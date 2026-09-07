@@ -1,0 +1,88 @@
+import datetime
+import os
+import openai   
+
+ openai.api_key = os.getenv("OPENAI_API_KEY")  
+
+ 
+KNOWLEDGE_BASE = {
+    "hello": "Hello there! How can I help you today?",
+    "hi": "Hi! Nice to see you.",
+    "how are you": "I'm just a bunch of code, but I'm doing great! How about you?",
+    "what is your name": "I'm PyBot, your friendly Python assistant.",
+    "weather": "I don't have live weather data, but it's always sunny in the cloud! ☁️",
+    "time": lambda: f"The current time is {datetime.datetime.now().strftime('%I:%M:%S %p')}.",
+    "help": "You can ask me about: hello, weather, time, my name, or just chat. Say 'exit' to quit.",
+}
+
+FALLBACK_SAFE = "Sorry, I didn't quite understand that. Type 'help' to see what I can do."
+EXIT_COMMANDS = {"exit", "quit", "bye", "goodbye"}
+
+ 
+SYSTEM_PROMPT = (
+    "You are a helpful, friendly assistant. "
+    "Answer the user's question concisely. "
+    "If the user asks for harmful, illegal, or inappropriate content, "
+    "politely refuse and say you cannot help with that."
+)
+
+def moderate_text(text: str) -> bool:
+    """Return True if text is flagged as unsafe (guardrail trigger)."""
+    try:
+        response = openai.Moderation.create(input=text)
+        return response.results[0].flagged
+    except Exception:
+         
+        return False
+
+def get_llm_response(user_input: str) -> str:
+    
+    try:
+        
+        if moderate_text(user_input):
+            return "I can't respond to that – it seems inappropriate."
+
+         resp = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_input}
+            ],
+            max_tokens=150,           
+            temperature=0.7,
+        )
+        reply = resp.choices[0].message.content.strip()
+
+        
+        if moderate_text(reply):
+            return "I generated a response, but it triggered safety filters. Please rephrase."
+
+        return reply
+
+    except openai.error.OpenAIError as e:
+       
+        return f"Sorry, I'm having trouble connecting. Please try again later. (Error: {e})"
+    except Exception:
+        return FALLBACK_SAFE
+
+ def clean_input(msg: str) -> str:
+    return msg.strip().lower()
+
+print("Bot : Hello! Type 'help' for options, or 'exit' to quit.")
+
+while True:
+    user = input("You : ").strip()
+    user_clean = clean_input(user)
+
+     if user_clean in EXIT_COMMANDS:
+        print("Bot : Goodbye! Have a great day.")
+        break
+
+     response = KNOWLEDGE_BASE.get(user_clean)
+
+     if response is None:
+         response = get_llm_response(user)
+    elif callable(response):
+        response = response()  
+
+    print("Bot:", response)
